@@ -1,0 +1,171 @@
+# Build ReaClassical Clara for pushes and pull requests, uploading it as a
+# workflow artifact. Pushing a version tag (e.g. v1.0.0) instead publishes a
+# proper GitHub Release.
+name: build
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+  pull_request:
+    types: [opened, synchronize]
+  workflow_dispatch:
+defaults:
+  run:
+    shell: bash
+env:
+  publisher: chmaha
+  VSCMD_SKIP_SENDTELEMETRY: 1
+  SCONS_CACHE_MSVC_CONFIG: 1
+concurrency:
+  # There's no point continuing to run a build if it's already outdated by
+  # another commit.
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+# Needed so a tagged build can publish a GitHub Release. Also requires "Read
+# and write permissions" under Settings > Actions > General > Workflow
+# permissions for this repo.
+permissions:
+  contents: write
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      # Serialized (not parallel) so, for a tagged build, the Windows and
+      # macOS jobs don't race to create/finalize the same release at the same
+      # time, which causes the upload step to fail with "Too many retries."
+      max-parallel: 1
+      matrix:
+        os: [windows-2025-vs2026, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: set env
+        # The secrets context can't be used directly in an if: condition, so
+        # compute whether signing secrets are configured here instead, where
+        # they're accessible as env vars.
+        env:
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          APPLE_CERTIFICATE_P12: ${{ secrets.APPLE_CERTIFICATE_P12 }}
+        run: |
+          echo "CACHE_KEY=${RUNNER_OS}-${ImageVersion}" >> $GITHUB_ENV
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            # A pushed version tag, e.g. v1.0.0. This is a proper tagged
+            # release rather than a rolling snapshot.
+            echo version=${GITHUB_REF_NAME#v} >> "$GITHUB_ENV"
+            echo isTaggedRelease=true >> "$GITHUB_ENV"
+          elif [ "$GITHUB_EVENT_NAME" = "push" ] || [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            # For example: 2025.3.7.2011,23631c6e
+            # We add 1800 to GITHUB_RUN_NUMBER because we can't set the
+            # starting number and we were already past 1700 on AppVeyor.
+            echo version=`date +%Y.%-m.%-d`.$((GITHUB_RUN_NUMBER + 1800)),${GITHUB_SHA:0:8} >> "$GITHUB_ENV"
+            echo isTaggedRelease=false >> "$GITHUB_ENV"
+          else
+            # For example: pr1234-101,23631c6e
+            echo version=pr${{ github.event.number }}-$GITHUB_RUN_NUMBER,${GITHUB_SHA:0:8} >> "$GITHUB_ENV"
+            echo isTaggedRelease=false >> "$GITHUB_ENV"
+          fi
+          if [ -n "$AZURE_TENANT_ID" ]; then
+            echo "hasAzureSecrets=true" >> "$GITHUB_ENV"
+          else
+            echo "hasAzureSecrets=false" >> "$GITHUB_ENV"
+          fi
+          if [ -n "$APPLE_CERTIFICATE_P12" ]; then
+            echo "hasAppleSecrets=true" >> "$GITHUB_ENV"
+          else
+            echo "hasAppleSecrets=false" >> "$GITHUB_ENV"
+          fi
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - name: setup
+        run: pip install scons
+      - name: SCons MSVC Cache
+        if: ${{ runner.os == 'Windows' }}
+        uses: actions/cache@v4
+        with:
+          path: ~\scons_msvc_cache.json
+          key: ${{ env.CACHE_KEY }}
+      - name: build
+        run: scons "publisher=${{ env.publisher }}" version=${{ env.version }}
+      - name: sign Windows build
+        # Skipped until Azure Trusted Signing secrets/vars are configured for
+        # this repo (Settings > Secrets and variables > Actions).
+        if: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && runner.os == 'Windows' && env.hasAzureSecrets == 'true' }}
+        uses: azure/trusted-signing-action@v0
+        with:
+          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+          endpoint: ${{ vars.AZURE_SIGNING_ENDPOINT }}
+          trusted-signing-account-name: ${{ vars.AZURE_SIGNING_NAME }}
+          certificate-profile-name: ${{ vars.AZURE_SIGNING_CERT_NAME }}
+          files-folder: ${{ github.workspace }}\build
+          files-folder-recurse: true
+          files-folder-filter: dll
+      - name: sign Mac
+        # Skipped until Apple Developer signing secrets are configured for
+        # this repo (Settings > Secrets and variables > Actions). Until then,
+        # Mac builds upload an unsigned dylib. Note this only codesigns the
+        # dylib; it doesn't notarize it, since notarization normally applies
+        # to a distributable bundle rather than a bare library. Revisit this
+        # once there's an Apple Developer account and a real distribution
+        # format is decided.
+        if: ${{ (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && runner.os == 'macOS' && env.hasAppleSecrets == 'true' }}
+        env:
+          APPLE_CERTIFICATE_P12: ${{ secrets.APPLE_CERTIFICATE_P12 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          set -euxo pipefail
+          security create-keychain -p temp_password build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p temp_password build.keychain
+          echo "$APPLE_CERTIFICATE_P12" | base64 --decode > certificate.p12
+          security import certificate.p12 -k build.keychain -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k temp_password build.keychain
+          identity=$(security find-identity -v -p codesigning build.keychain | grep "Developer ID Application" | head -1 | sed 's/.*) \([^"]*\).*/\1/' | xargs)
+          if [ -z "$identity" ]; then
+            echo "No codesigning identity found in build.keychain!"
+            exit 1
+          fi
+          codesign --force --options runtime --timestamp --sign "$identity" build/reaper_clara.dylib
+          rm certificate.p12
+          security delete-keychain build.keychain
+      # A pushed version tag (e.g. v1.0.0) gets its own permanent release
+      # with the same 4 binaries, and becomes the repo's "latest" release.
+      # Since filenames are constant across releases, a URL like
+      # https://github.com/chmaha/ReaClassical_Clara/releases/latest/download/reaper_clara.dylib
+      # always resolves to this release's asset without needing to know the
+      # current version number.
+      - id: uploadTaggedRelease
+        name: upload tagged release
+        if: ${{ github.event_name == 'push' && env.isTaggedRelease == 'true' }}
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            build/*/reaper_clara*.dll
+            build/reaper_clara.dylib
+          tag_name: ${{ github.ref_name }}
+          prerelease: false
+          make_latest: true
+          generate_release_notes: true
+      # Non-tagged builds (pushes to main, workflow_dispatch, and pull
+      # requests) are uploaded as workflow artifacts rather than a release.
+      - name: upload build Win
+        if: ${{ env.isTaggedRelease == 'false' && runner.os == 'Windows' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: clara_windows_${{ env.version }}
+          path: build/*/reaper_clara*.dll
+      - name: upload build Mac
+        if: ${{ env.isTaggedRelease == 'false' && matrix.os == 'macos-latest' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: clara_mac_${{ env.version }}
+          path: build/reaper_clara.dylib
+      - name: upload debug symbols Win
+        if: ${{ runner.os == 'Windows' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows_debug_symbols
+          path: build/*/*.pdb

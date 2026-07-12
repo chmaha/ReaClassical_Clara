@@ -1,0 +1,9 @@
+*.dll
+*.exp
+*.lib
+*.obj
+.sconsign.dblite
+build
+.DS_Store
+__pycache__
+*.bak

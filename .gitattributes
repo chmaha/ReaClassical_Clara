@@ -1,0 +1,10 @@
+.gitattributes text
+.gitignore text
+*.cpp text
+*.h text
+*.mm text
+*.md text
+sconstruct text
+*sconscript text
+*.txt text
+*.yml text

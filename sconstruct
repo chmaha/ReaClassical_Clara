@@ -1,0 +1,44 @@
+# ReaClassical Clara (a minimal screen-reader announcer fork of OSARA)
+# SConstruct
+# Copyright 2015-2025 NV Access Limited, James Teh
+# License: GNU General Public License version 2.0
+
+import multiprocessing
+
+vars = Variables()
+vars.Add("version", "The version of this build", "unknown")
+vars.Add("publisher", "The publisher of this build", "unknown")
+env = DefaultEnvironment(tools=[],
+	variables=vars,
+	copyright="Copyright (C) 2014-2025 NV Access Limited, James Teh & other contributors",
+)
+
+# Make sure to run the build on multiple threads so it runs faster
+env.SetOption('num_jobs', multiprocessing.cpu_count())
+print("Building using {} jobs".format(env.GetOption('num_jobs')))
+
+libs = []
+if env["PLATFORM"] == "win32":
+	for arch, suffix in (
+		("x86", "32"),
+		("x86_64", "64"),
+		("arm64", "_arm64ec"),
+	):
+		archEnv = Environment(tools=["msvc", "mslink", "textfile"],
+			TARGET_ARCH=arch, HOST_ARCH=arch, libSuffix=suffix,
+			version=env["version"], copyright=env["copyright"],
+			# Hack around an odd bug where some tool after msvc states that static and shared objects are different.
+			STATIC_AND_SHARED_OBJECTS_ARE_THE_SAME=1)
+		libs.append(archEnv.SConscript("src/archBuild_sconscript",
+			exports={"env": archEnv},
+			variant_dir="build/%s" % arch, duplicate=False))
+
+else: # Mac
+	archEnv = Environment(tools=["clangxx", "applelink", "textfile"],
+		libSuffix="", version=env["version"], copyright=env["copyright"])
+	libs.append(archEnv.SConscript("src/archBuild_sconscript",
+		exports={"env": archEnv},
+		variant_dir="build", duplicate=False))
+
+env.Alias("build", libs)
+env.Default(libs)
