@@ -18,6 +18,28 @@ void* _vararg_clara_outputMessage(void** args, int nArgs) {
 	return nullptr;
 }
 
+// Find a top-level window by exact title match, and give it OS focus.
+// FindWindowEx/SetFocus resolve to native Win32 on Windows and to SWELL's
+// equivalents on Mac (see clara.h's windows.h include), so this needs no
+// platform-specific code. Together, these two functions cover the same
+// ground js_ReaScriptAPI's JS_Window_Find/JS_Window_SetFocus were being
+// used for elsewhere, without requiring that extra download for Clara
+// users (who are Windows/macOS only).
+HWND clara_findWindow(const char* title) {
+	return FindWindowEx(nullptr, nullptr, nullptr, title);
+}
+void* _vararg_clara_findWindow(void** args, int nArgs) {
+	return (void*)clara_findWindow((const char*)args[0]);
+}
+
+void clara_setFocus(HWND hwnd) {
+	SetFocus(hwnd);
+}
+void* _vararg_clara_setFocus(void** args, int nArgs) {
+	clara_setFocus((HWND)args[0]);
+	return nullptr;
+}
+
 void registerExports(reaper_plugin_info_t* rec) {
 	rec->Register("API_clara_outputMessage", (void*)clara_outputMessage);
 	rec->Register("APIvararg_clara_outputMessage",
@@ -28,4 +50,19 @@ void registerExports(reaper_plugin_info_t* rec) {
 		"This should only be used in consultation with screen reader users. "
 		"Note that this may not work on Windows when certain GUI controls have "
 		"focus such as list boxes and trees.");
+
+	rec->Register("API_clara_findWindow", (void*)clara_findWindow);
+	rec->Register("APIvararg_clara_findWindow",
+		(void*)_vararg_clara_findWindow);
+	rec->Register("APIdef_clara_findWindow",
+		(void*)"HWND\0const char*\0title\0"
+		"Find a top-level window by exact title match. "
+		"Returns NULL if no matching window is found.");
+
+	rec->Register("API_clara_setFocus", (void*)clara_setFocus);
+	rec->Register("APIvararg_clara_setFocus",
+		(void*)_vararg_clara_setFocus);
+	rec->Register("APIdef_clara_setFocus",
+		(void*)"void\0HWND\0hwnd\0"
+		"Give OS focus to the given window.");
 }
