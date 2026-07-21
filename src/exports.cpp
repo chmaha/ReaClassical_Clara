@@ -36,26 +36,7 @@ void clara_setFocus(HWND hwnd) {
 	if (!hwnd) {
 		return;
 	}
-#ifdef _WIN32
-	// A bare SetFocus silently no-ops on Windows unless hwnd's thread is
-	// already the foreground/active one, which it usually isn't here --
-	// this is normally called right after something else (e.g.
-	// SetCursorContext) stole real OS focus elsewhere. AttachThreadInput
-	// temporarily merges the input queues so SetForegroundWindow/SetFocus
-	// are allowed to actually move focus; this is the same workaround
-	// js_ReaScriptAPI's JS_Window_SetFocus uses.
-	const DWORD curThread = GetCurrentThreadId();
-	const DWORD targetThread = GetWindowThreadProcessId(hwnd, nullptr);
-	const bool attached = targetThread && targetThread != curThread &&
-		AttachThreadInput(curThread, targetThread, TRUE);
-	SetForegroundWindow(hwnd);
 	SetFocus(hwnd);
-	if (attached) {
-		AttachThreadInput(curThread, targetThread, FALSE);
-	}
-#else
-	SetFocus(hwnd);
-#endif
 }
 void* _vararg_clara_setFocus(void** args, int nArgs) {
 	clara_setFocus((HWND)args[0]);
@@ -77,7 +58,7 @@ void registerExports(reaper_plugin_info_t* rec) {
 	rec->Register("APIvararg_clara_findWindow",
 		(void*)_vararg_clara_findWindow);
 	rec->Register("APIdef_clara_findWindow",
-		(void*)"HWND\0const char*\0title\0"
+		(void*)"void*\0const char*\0title\0"
 		"Find a top-level window by exact title match. "
 		"Returns NULL if no matching window is found.");
 
@@ -85,6 +66,6 @@ void registerExports(reaper_plugin_info_t* rec) {
 	rec->Register("APIvararg_clara_setFocus",
 		(void*)_vararg_clara_setFocus);
 	rec->Register("APIdef_clara_setFocus",
-		(void*)"void\0HWND\0hwnd\0"
+		(void*)"void\0void*\0hwnd\0"
 		"Give OS focus to the given window.");
 }
