@@ -10,6 +10,10 @@ env.Append(CPPPATH=(
 	"#include",
 	"#include/WDL",
 ))
+# Exposed to ReaScript via clara_getVersion() so callers (e.g. ReaClassical's
+# terminal updater) can check the installed version without parsing it out of
+# a file on disk.
+env.Append(CPPDEFINES={"CLARA_VERSION": '\\"%s\\"' % env["version"]})
 sources = [
 	"reaper_clara.cpp",
 	"exports.cpp",

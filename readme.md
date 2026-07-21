@@ -2,6 +2,7 @@
 
 Clara is a minimal REAPER extension that exposes a few ReaScript API functions for accessibility, used by [ReaClassical](https://reaclassical.org) to give screen reader users spoken feedback and window focus recovery from its own scripts:
 
+- `clara_getVersion()` — the installed Clara version (e.g. "1.1.2"), so callers can check whether they're already on the latest release.
 - `clara_outputMessage(message)` — send text directly to screen readers (via MSAA/UIA on Windows, NSAccessibility on Mac).
 - `clara_findWindow(title)` — find a top-level window by exact title match, returning its HWND (or NULL).
 - `clara_setFocus(hwnd)` — give OS focus to a window.

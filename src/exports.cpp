@@ -10,6 +10,17 @@
 
 // The _vararg_ version is needed for ReaScript.
 
+#ifndef CLARA_VERSION
+#define CLARA_VERSION "unknown"
+#endif
+
+const char* clara_getVersion() {
+	return CLARA_VERSION;
+}
+void* _vararg_clara_getVersion(void** args, int nArgs) {
+	return (void*)clara_getVersion();
+}
+
 void clara_outputMessage(const char* message) {
 	_outputMessage(message);
 }
@@ -44,6 +55,13 @@ void* _vararg_clara_setFocus(void** args, int nArgs) {
 }
 
 void registerExports(reaper_plugin_info_t* rec) {
+	rec->Register("API_clara_getVersion", (void*)clara_getVersion);
+	rec->Register("APIvararg_clara_getVersion",
+		(void*)_vararg_clara_getVersion);
+	rec->Register("APIdef_clara_getVersion",
+		(void*)"const char*\0\0\0"
+		"Returns the installed Clara version (e.g. \"1.1.2\").");
+
 	rec->Register("API_clara_outputMessage", (void*)clara_outputMessage);
 	rec->Register("APIvararg_clara_outputMessage",
 		(void*)_vararg_clara_outputMessage);
