@@ -33,7 +33,29 @@ void* _vararg_clara_findWindow(void** args, int nArgs) {
 }
 
 void clara_setFocus(HWND hwnd) {
+	if (!hwnd) {
+		return;
+	}
+#ifdef _WIN32
+	// A bare SetFocus silently no-ops on Windows unless hwnd's thread is
+	// already the foreground/active one, which it usually isn't here --
+	// this is normally called right after something else (e.g.
+	// SetCursorContext) stole real OS focus elsewhere. AttachThreadInput
+	// temporarily merges the input queues so SetForegroundWindow/SetFocus
+	// are allowed to actually move focus; this is the same workaround
+	// js_ReaScriptAPI's JS_Window_SetFocus uses.
+	const DWORD curThread = GetCurrentThreadId();
+	const DWORD targetThread = GetWindowThreadProcessId(hwnd, nullptr);
+	const bool attached = targetThread && targetThread != curThread &&
+		AttachThreadInput(curThread, targetThread, TRUE);
+	SetForegroundWindow(hwnd);
 	SetFocus(hwnd);
+	if (attached) {
+		AttachThreadInput(curThread, targetThread, FALSE);
+	}
+#else
+	SetFocus(hwnd);
+#endif
 }
 void* _vararg_clara_setFocus(void** args, int nArgs) {
 	clara_setFocus((HWND)args[0]);
