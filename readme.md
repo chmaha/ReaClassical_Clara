@@ -7,6 +7,8 @@ Clara is a minimal REAPER extension that exposes a few ReaScript API functions f
 - `clara_findWindow(title)` — find a top-level window by exact title match, returning its HWND (or NULL).
 - `clara_setFocus(hwnd)` — give OS focus to a window.
 
+It also registers one action, "Clara: Toggle shortcut help" (`_CLARA_SHORTCUTHELP`). While it's on, any shortcut that maps to a REAPER action is announced by name instead of being run, as in OSARA.
+
 It does none of OSARA's automatic reporting — no track/item/action announcements, no key map. It's just a manual announcer/focus building block; Clara users don't need js_ReaScriptAPI installed for window-focus recovery, since `clara_findWindow`/`clara_setFocus` cover it directly.
 
 ## Origin

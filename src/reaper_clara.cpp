@@ -26,6 +26,7 @@ using namespace std;
 
 HINSTANCE pluginHInstance;
 HWND mainHwnd;
+bool isShortcutHelpEnabled = false;
 #ifdef _WIN32
 CComPtr<IAccPropServices> accPropServices;
 #endif
@@ -104,6 +105,76 @@ void _outputMessage(const string& message, bool interrupt) {
 
 #endif // _WIN32
 
+
+/*** Shortcut help */
+
+constexpr int MAIN_SECTION = 0;
+constexpr int MAIN_ALT1_SECTION = 1;
+constexpr int MAIN_ALT16_SECTION = 16;
+constexpr int MAIN_ALT_REC_SECTION = 100;
+constexpr int MIDI_EDITOR_SECTION = 32060;
+constexpr int CMD_MOMENTARILY_SET_OVERRIDE_TO_DEFAULT = 24851;
+constexpr int CMD_MOMENTARILY_SET_OVERRIDE_TO_ALT16 = 24868;
+
+int shortcutHelpCommand = 0;
+gaccel_register_t shortcutHelpGaccel;
+
+void cmdShortcutHelp() {
+	static bool wasMidiStepInputEnabled = false;
+	auto toggleMidiStepInput = [] {
+		if (HWND editor = MIDIEditor_GetActive()) {
+			MIDIEditor_OnCommand(editor, 40481);
+		}
+	};
+	ostringstream s;
+	if (isShortcutHelpEnabled) {
+		isShortcutHelpEnabled = false;
+		s << "shortcut help off";
+		if (wasMidiStepInputEnabled) {
+			toggleMidiStepInput();
+			s << ", resumed MIDI step input";
+		}
+	} else {
+		isShortcutHelpEnabled = true;
+		s << "shortcut help on";
+		wasMidiStepInputEnabled = MIDIEditor_GetActive() && GetToggleCommandState2(
+			SectionFromUniqueID(MIDI_EDITOR_SECTION), 40481);
+		if (wasMidiStepInputEnabled) {
+			toggleMidiStepInput();
+			s << ", paused MIDI step input";
+		}
+	}
+	_outputMessage(s.str());
+}
+
+bool handleCommand(KbdSectionInfo* section, int command, int val, int valHw, int relMode, HWND hwnd) {
+	if ((MAIN_ALT1_SECTION <= section->uniqueID &&
+				section->uniqueID <= MAIN_ALT16_SECTION) ||
+			section->uniqueID == MAIN_ALT_REC_SECTION) {
+		section = SectionFromUniqueID(MAIN_SECTION);
+	}
+	if (section->uniqueID == MAIN_SECTION && command == shortcutHelpCommand) {
+		cmdShortcutHelp();
+		return true;
+	}
+	if (!isShortcutHelpEnabled) {
+		return false;
+	}
+	// Let momentary override actions through so users can learn about shortcuts
+	// in those alternative sections.
+	if (command >= CMD_MOMENTARILY_SET_OVERRIDE_TO_DEFAULT &&
+			command <= CMD_MOMENTARILY_SET_OVERRIDE_TO_ALT16) {
+		return false;
+	}
+	_outputMessage(kbd_getTextFromCmd(command, section));
+	return true;
+}
+
+bool handleMainCommandFallback(int command, int flag) {
+	return handleCommand(SectionFromUniqueID(MAIN_SECTION), command, 63, -1, 0,
+		nullptr);
+}
+
 extern "C" {
 
 REAPER_PLUGIN_DLL_EXPORT int REAPER_PLUGIN_ENTRYPOINT(REAPER_PLUGIN_HINSTANCE hInstance, reaper_plugin_info_t* rec) {
@@ -134,6 +205,13 @@ REAPER_PLUGIN_DLL_EXPORT int REAPER_PLUGIN_ENTRYPOINT(REAPER_PLUGIN_HINSTANCE hI
 #else
 		NSA11yWrapper::init();
 #endif
+		shortcutHelpCommand = rec->Register("command_id", (void*)"CLARA_SHORTCUTHELP");
+		shortcutHelpGaccel.accel.cmd = shortcutHelpCommand;
+		shortcutHelpGaccel.desc = "Clara: Toggle shortcut help";
+		rec->Register("gaccel", &shortcutHelpGaccel);
+		// hookcommand2 must be registered before hookcommand.
+		rec->Register("hookcommand2", (void*)handleCommand);
+		rec->Register("hookcommand", (void*)handleMainCommandFallback);
 		registerExports(rec);
 		return 1;
 

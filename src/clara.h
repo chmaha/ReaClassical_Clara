@@ -22,12 +22,18 @@
 
 #define REAPERAPI_MINIMAL
 #define REAPERAPI_WANT_GetExtState
+#define REAPERAPI_WANT_kbd_getTextFromCmd
+#define REAPERAPI_WANT_SectionFromUniqueID
+#define REAPERAPI_WANT_GetToggleCommandState2
+#define REAPERAPI_WANT_MIDIEditor_GetActive
+#define REAPERAPI_WANT_MIDIEditor_OnCommand
 
 #include <reaper/reaper_plugin.h>
 #include <reaper/reaper_plugin_functions.h>
 
 extern HINSTANCE pluginHInstance;
 extern HWND mainHwnd;
+extern bool isShortcutHelpEnabled;
 
 void _outputMessage(const std::string& message, bool interrupt = true);
 
